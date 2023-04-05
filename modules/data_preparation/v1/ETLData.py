@@ -26,10 +26,9 @@ class ETLData:
         .compute_column(column_name='efficiency', fn_arg_col_names=['energy_input_in_mwh', 'energy_output_in_mwh'], fn_compute=efficiency_fn)
         )
     '''
-# TODO: __init__: integrate temperature data
 # TODO: method: resample timeseries data
 
-    def __init__(self, energy_data_path, temperature_data_path=None):
+    def __init__(self, energy_data_path):
         
         # load energy data
         self.data = pd.read_csv(energy_data_path)
@@ -72,6 +71,21 @@ class ETLData:
         
         return self
     
+    def keep_columns(self, column_names):
+        '''
+        Keep only column names specified in dataset
+        
+        PARAMETERS
+        column_names: [string array] Array of column names to keep
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.keep_columns(['timestamp_local', 'energy_input_in_mwh'])
+        '''
+        self.data = self.data[column_names]
+        
+        return self
+    
     def filter_by_column_value(self, column_name, filter_function, save=True):
         '''
         Filter column by applying filter_function to values in column_name
@@ -110,7 +124,7 @@ class ETLData:
         dataset1 = ETLData('./data/dataset1.csv')
         efficiency_fn = (lambda e_in, e_out: e_out/e_in)
         (
-        dataset.to_numeric(['energy_input_in_mwh', 'energy_output_in_mwh'])
+        dataset1.to_numeric(['energy_input_in_mwh', 'energy_output_in_mwh'])
                .compute_column(column_name='efficiency', fn_arg_col_names=['energy_input_in_mwh', 'energy_output_in_mwh'], fn_compute=efficiency_fn)
         )
         '''
@@ -133,4 +147,64 @@ class ETLData:
             return self
         else:
             return eval(generate_fn_str('fn_compute', fn_arg_col_names))
+        
+        
+    def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name):
+        '''
+        Temperature data for each building must be stored in a csv file named 'building_id.csv'.
+        Each temperature file will be loaded, formatted and the temperature corresponding to each building 
+        and timestamp will be joined with the energy dataset.
+        
+        PARAMETERS
+        temperature_data_path: [str] Path to csv files containing temperature data for each building.
+        timestamp_column_name: [str] Column name containing timestamps to be considered.
+        temperature_column_name: [str] Temperature column to be considered.
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.load_temperature_data()        
+        '''
+        new_dataset = pd.DataFrame()
+        
+        for building_name in list(self.data['building_id'].value_counts().index):
+            
+            # load building temperature data
+            temp_data_file = temperature_data_path + building_name + '.csv'
+            building_temp_data = pd.read_csv(temp_data_file)
+            
+            # keep timestamp and temperature columns
+            building_temp_data = building_temp_data[[timestamp_column_name, temperature_column_name]]
+            
+            # format temperature numeric
+            building_temp_data[temperature_column_name] = building_temp_data[temperature_column_name].str.replace(',','.')
+            building_temp_data[temperature_column_name] = pd.to_numeric(building_temp_data[temperature_column_name])
+            
+            # format timeseries
+            building_temp_data[timestamp_column_name] = pd.to_datetime(building_temp_data[timestamp_column_name])
+            building_temp_data.sort_values(by=timestamp_column_name, inplace = True)
+            building_temp_data.set_index([timestamp_column_name], inplace=True)
+            
+            # join temperature and energy data
+            building_energy_temp = self.data[self.data['building_id'] == building_name].join(building_temp_data, how='left')
+            
+            new_dataset = new_dataset.append(building_energy_temp)
+            
+        self.data = new_dataset
+        
+        return self
+        
+    def rename_column(self, column_name_dictionary):
+        '''
+        Renama columns from the dataset
+        
+        PARAMETERS
+        column_name_dictionary: [dictionary] Dictionary contaning a mapping of old_column_name : new_column_name
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.rename_column({'surfaceTemperatureCelsius': 'temperature'})        
+        '''
+        self.data = self.data.rename(columns=column_name_dictionary)
+        
+        return self
         

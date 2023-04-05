@@ -193,3 +193,18 @@ class ETLData:
         
         return self
         
+    def rename_column(self, column_name_dictionary):
+        '''
+        Renama columns from the dataset
+        
+        PARAMETERS
+        column_name_dictionary: [dictionary] Dictionary contaning a mapping of old_column_name : new_column_name
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.rename_column({'surfaceTemperatureCelsius': 'temperature'})        
+        '''
+        self.data = self.data.rename(columns=column_name_dictionary)
+        
+        return self
+        

@@ -109,7 +109,7 @@ class ETLData:
             return self.data[self.data[column_name].apply(filter_function)]
 
         
-    def compute_column(self, column_name, fn_arg_col_names, fn_compute, save=True):
+    def compute_column(self, column_name, fn_arg_col_names, fn_compute, save=True, additional_args=None):
         '''
         Assign new or existing column (indicated by column_name), values computed using the fn_compute function.
         The function uses data dataframe columns (indicated by fn_arg_col_names) as arguments.
@@ -119,6 +119,7 @@ class ETLData:
         fn_arg_col_names: [list] List of column names to be used as argument to fn_compute. 
                                  Order must match fn_compute arguments.
         fn_compute: [fnc] Defines computation to be carried out
+        additional_args: [array] Array of additional arguments which the fn_compute may require for calculations
         
         EXAMPLE
         dataset1 = ETLData('./data/dataset1.csv')
@@ -130,13 +131,20 @@ class ETLData:
         '''
             
         def generate_arg_str(col):
-            return 'self.data[' + "'" + col + "'" + ']'
+            return 'self.data[' + "'" + str(col) + "'" + ']'
         
         def generate_args_str(column_names):
             args = ''
             for i in range(len(column_names)-1):
                 args = args + generate_arg_str(column_names[i]) + ','
             args = args + generate_arg_str(column_names[len(column_names)-1])
+            
+            if additional_args is not None:
+                args = args + ','
+                for i in range(len(additional_args)-1):
+                    args = args + str(additional_args[i]) + ','
+                args = args + str(additional_args[len(additional_args)-1])
+                    
             return args
         
         def generate_fn_str(function_name, column_names):
@@ -149,7 +157,7 @@ class ETLData:
             return eval(generate_fn_str('fn_compute', fn_arg_col_names))
         
         
-    def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name):
+    def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name, numeric_format=True):
         '''
         Temperature data for each building must be stored in a csv file named 'building_id.csv'.
         Each temperature file will be loaded, formatted and the temperature corresponding to each building 
@@ -175,9 +183,10 @@ class ETLData:
             # keep timestamp and temperature columns
             building_temp_data = building_temp_data[[timestamp_column_name, temperature_column_name]]
             
-            # format temperature numeric
-            building_temp_data[temperature_column_name] = building_temp_data[temperature_column_name].str.replace(',','.')
-            building_temp_data[temperature_column_name] = pd.to_numeric(building_temp_data[temperature_column_name])
+            if numeric_format:
+                # format temperature numeric
+                building_temp_data[temperature_column_name] = building_temp_data[temperature_column_name].str.replace(',','.')
+                building_temp_data[temperature_column_name] = pd.to_numeric(building_temp_data[temperature_column_name])
             
             # format timeseries
             building_temp_data[timestamp_column_name] = pd.to_datetime(building_temp_data[timestamp_column_name])

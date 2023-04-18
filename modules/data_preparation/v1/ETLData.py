@@ -28,11 +28,23 @@ class ETLData:
     '''
 # TODO: method: resample timeseries data
 
-    def __init__(self, energy_data_path):
+    def __init__(self, energy_data_path, sheet_name=0):
         
-        # load energy data
-        self.data = pd.read_csv(energy_data_path)
+        self.building_sheet_name = {
+            'it049959b' : 'it049959b weather',
+            'it019820w' : 'it019820w weather',
+            'it0' : 'it0 weather',
+            'it003515r': 'it003515r weather'
+        }
         
+        if energy_data_path.endswith('.csv'):
+            # load energy data
+            self.data = pd.read_csv(energy_data_path)
+        elif energy_data_path.endswith('.xlsx'):
+            self.data = pd.read_excel(energy_data_path, sheet_name=sheet_name)
+        else:
+            raise Exception('File should have extension .csv or .xlsx')
+            
             
     def get_data(self):
         return self.data
@@ -159,10 +171,14 @@ class ETLData:
         
     def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name, numeric_format=True):
         '''
+        IF temperature_data_path IS A CSV PATH
         Temperature data for each building must be stored in a csv file named 'building_id.csv'.
         Each temperature file will be loaded, formatted and the temperature corresponding to each building 
         and timestamp will be joined with the energy dataset.
         
+        IF temperature_data_path IS AN EXCEL PATH
+        A dictionary matching building_id and excel sheet name will be used to load the temperature corresponding to the matching building.
+
         PARAMETERS
         temperature_data_path: [str] Path to csv files containing temperature data for each building.
         timestamp_column_name: [str] Column name containing timestamps to be considered.
@@ -177,9 +193,15 @@ class ETLData:
         for building_name in list(self.data['building_id'].value_counts().index):
             
             # load building temperature data
-            temp_data_file = temperature_data_path + building_name + '.csv'
-            building_temp_data = pd.read_csv(temp_data_file)
-            
+            if (temperature_data_path.endswith('.csv')):
+                temp_data_file = temperature_data_path + building_name + '.csv'
+                building_temp_data = pd.read_csv(temp_data_file)
+                
+            elif (temperature_data_path.endswith('.xlsx')):
+                building_temp_data = pd.read_excel(temperature_data_path, sheet_name=self.building_sheet_name[building_name])
+            else:
+                raise Exception('File should have extension .csv or .xlsx')
+                
             # keep timestamp and temperature columns
             building_temp_data = building_temp_data[[timestamp_column_name, temperature_column_name]]
             
@@ -215,5 +237,20 @@ class ETLData:
         '''
         self.data = self.data.rename(columns=column_name_dictionary)
         
+        return self
+    
+    def apply(self, column_name, fn_compute):
+        '''
+        Apply function to dataframe rows.
+        
+        PARAMETERS
+        column_name: [str] column name on which function will be applied
+        fn_compute: [fn] lambda function to be applied to the rows of the specified columns
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.apply('temperature', lambda x: max(x,0))        
+        '''        
+        self.data[column_name] = self.data[column_name].apply(fn_compute)
         return self
         

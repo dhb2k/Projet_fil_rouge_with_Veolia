@@ -2,6 +2,8 @@
 
 # imports
 import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
+import calendar
 
 class ETLData:
     '''
@@ -123,6 +125,7 @@ class ETLData:
         
     def compute_column(self, column_name, fn_arg_col_names, fn_compute, save=True, additional_args=None):
         '''
+        Computes columns from existing columns.
         Assign new or existing column (indicated by column_name), values computed using the fn_compute function.
         The function uses data dataframe columns (indicated by fn_arg_col_names) as arguments.
         
@@ -193,14 +196,11 @@ class ETLData:
         for building_name in list(self.data['building_id'].value_counts().index):
             
             # load building temperature data
-            if (temperature_data_path.endswith('.csv')):
-                temp_data_file = temperature_data_path + building_name + '.csv'
-                building_temp_data = pd.read_csv(temp_data_file)
-                
-            elif (temperature_data_path.endswith('.xlsx')):
+            if (temperature_data_path.endswith('.xlsx')):
                 building_temp_data = pd.read_excel(temperature_data_path, sheet_name=self.building_sheet_name[building_name])
             else:
-                raise Exception('File should have extension .csv or .xlsx')
+                temp_data_file = temperature_data_path + building_name + '.csv'
+                building_temp_data = pd.read_csv(temp_data_file)
                 
             # keep timestamp and temperature columns
             building_temp_data = building_temp_data[[timestamp_column_name, temperature_column_name]]
@@ -253,4 +253,33 @@ class ETLData:
         '''        
         self.data[column_name] = self.data[column_name].apply(fn_compute)
         return self
+    
+    def join_columns(self, df_columns):
+        '''
+        Join new columns to dataset. Left join with ETL dataset on the left. Column names of df_columns must not already be present in the dataset!!!
         
+        PARAMETERS
+        df_columns: [df] dataframe containing data to be left joined with current dataset. Column names must not already be present in dataset!!!
+        ''' 
+        self.data = self.data.join(df_columns, how='left')
+        return self
+    
+    def get_month_features(self):
+        '''
+        Add one-hot encoded feature of the month in dataset (12 binary columns to represent months).
+        Dataset must be formatted in timeseries (index must be timestamps!)
+        '''
+        # create month feature
+        month = pd.Series(self.data.index).apply(lambda x: str(x)[5:7]).values
+
+        # one hot encode month feature
+        month_encoder = OneHotEncoder(handle_unknown='ignore')
+        month_encoder.fit(month.reshape(-1, 1))
+        month_encoding = pd.DataFrame(month_encoder.transform(month.reshape(-1, 1)).toarray())
+
+        month_names = list(calendar.month_name)[1:]
+        month_names = [month.lower()[0:3] for month in month_names]
+
+        for i in range(len(month_names)):
+            self.data[month_names[i]] = month_encoding[i].values
+    

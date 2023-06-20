@@ -2,6 +2,8 @@
 
 # imports
 import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
+import calendar
 
 class ETLData:
     '''
@@ -28,11 +30,23 @@ class ETLData:
     '''
 # TODO: method: resample timeseries data
 
-    def __init__(self, energy_data_path):
+    def __init__(self, energy_data_path, sheet_name=0):
         
-        # load energy data
-        self.data = pd.read_csv(energy_data_path)
+        self.building_sheet_name = {
+            'it049959b' : 'it049959b weather',
+            'it019820w' : 'it019820w weather',
+            'it0' : 'it0 weather',
+            'it003515r': 'it003515r weather'
+        }
         
+        if energy_data_path.endswith('.csv'):
+            # load energy data
+            self.data = pd.read_csv(energy_data_path)
+        elif energy_data_path.endswith('.xlsx'):
+            self.data = pd.read_excel(energy_data_path, sheet_name=sheet_name)
+        else:
+            raise Exception('File should have extension .csv or .xlsx')
+            
             
     def get_data(self):
         return self.data
@@ -109,8 +123,9 @@ class ETLData:
             return self.data[self.data[column_name].apply(filter_function)]
 
         
-    def compute_column(self, column_name, fn_arg_col_names, fn_compute, save=True):
+    def compute_column(self, column_name, fn_arg_col_names, fn_compute, save=True, additional_args=None):
         '''
+        Computes columns from existing columns.
         Assign new or existing column (indicated by column_name), values computed using the fn_compute function.
         The function uses data dataframe columns (indicated by fn_arg_col_names) as arguments.
         
@@ -119,6 +134,7 @@ class ETLData:
         fn_arg_col_names: [list] List of column names to be used as argument to fn_compute. 
                                  Order must match fn_compute arguments.
         fn_compute: [fnc] Defines computation to be carried out
+        additional_args: [array] Array of additional arguments which the fn_compute may require for calculations
         
         EXAMPLE
         dataset1 = ETLData('./data/dataset1.csv')
@@ -130,13 +146,20 @@ class ETLData:
         '''
             
         def generate_arg_str(col):
-            return 'self.data[' + "'" + col + "'" + ']'
+            return 'self.data[' + "'" + str(col) + "'" + ']'
         
         def generate_args_str(column_names):
             args = ''
             for i in range(len(column_names)-1):
                 args = args + generate_arg_str(column_names[i]) + ','
             args = args + generate_arg_str(column_names[len(column_names)-1])
+            
+            if additional_args is not None:
+                args = args + ','
+                for i in range(len(additional_args)-1):
+                    args = args + str(additional_args[i]) + ','
+                args = args + str(additional_args[len(additional_args)-1])
+                    
             return args
         
         def generate_fn_str(function_name, column_names):
@@ -149,12 +172,16 @@ class ETLData:
             return eval(generate_fn_str('fn_compute', fn_arg_col_names))
         
         
-    def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name):
+    def load_temperature_data(self, temperature_data_path, timestamp_column_name, temperature_column_name, numeric_format=True):
         '''
+        IF temperature_data_path IS A CSV PATH
         Temperature data for each building must be stored in a csv file named 'building_id.csv'.
         Each temperature file will be loaded, formatted and the temperature corresponding to each building 
         and timestamp will be joined with the energy dataset.
         
+        IF temperature_data_path IS AN EXCEL PATH
+        A dictionary matching building_id and excel sheet name will be used to load the temperature corresponding to the matching building.
+
         PARAMETERS
         temperature_data_path: [str] Path to csv files containing temperature data for each building.
         timestamp_column_name: [str] Column name containing timestamps to be considered.
@@ -169,15 +196,19 @@ class ETLData:
         for building_name in list(self.data['building_id'].value_counts().index):
             
             # load building temperature data
-            temp_data_file = temperature_data_path + building_name + '.csv'
-            building_temp_data = pd.read_csv(temp_data_file)
-            
+            if (temperature_data_path.endswith('.xlsx')):
+                building_temp_data = pd.read_excel(temperature_data_path, sheet_name=self.building_sheet_name[building_name])
+            else:
+                temp_data_file = temperature_data_path + building_name + '.csv'
+                building_temp_data = pd.read_csv(temp_data_file)
+                
             # keep timestamp and temperature columns
             building_temp_data = building_temp_data[[timestamp_column_name, temperature_column_name]]
             
-            # format temperature numeric
-            building_temp_data[temperature_column_name] = building_temp_data[temperature_column_name].str.replace(',','.')
-            building_temp_data[temperature_column_name] = pd.to_numeric(building_temp_data[temperature_column_name])
+            if numeric_format:
+                # format temperature numeric
+                building_temp_data[temperature_column_name] = building_temp_data[temperature_column_name].str.replace(',','.')
+                building_temp_data[temperature_column_name] = pd.to_numeric(building_temp_data[temperature_column_name])
             
             # format timeseries
             building_temp_data[timestamp_column_name] = pd.to_datetime(building_temp_data[timestamp_column_name])
@@ -207,4 +238,48 @@ class ETLData:
         self.data = self.data.rename(columns=column_name_dictionary)
         
         return self
+    
+    def apply(self, column_name, fn_compute):
+        '''
+        Apply function to dataframe rows.
         
+        PARAMETERS
+        column_name: [str] column name on which function will be applied
+        fn_compute: [fn] lambda function to be applied to the rows of the specified columns
+        
+        EXAMPLE
+        dataset1 = ETLData('./data/dataset1.csv')
+        dataset1.apply('temperature', lambda x: max(x,0))        
+        '''        
+        self.data[column_name] = self.data[column_name].apply(fn_compute)
+        return self
+    
+    def join_columns(self, df_columns):
+        '''
+        Join new columns to dataset. Left join with ETL dataset on the left. Column names of df_columns must not already be present in the dataset!!!
+        
+        PARAMETERS
+        df_columns: [df] dataframe containing data to be left joined with current dataset. Column names must not already be present in dataset!!!
+        ''' 
+        self.data = self.data.join(df_columns, how='left')
+        return self
+    
+    def get_month_features(self):
+        '''
+        Add one-hot encoded feature of the month in dataset (12 binary columns to represent months).
+        Dataset must be formatted in timeseries (index must be timestamps!)
+        '''
+        # create month feature
+        month = pd.Series(self.data.index).apply(lambda x: str(x)[5:7]).values
+
+        # one hot encode month feature
+        month_encoder = OneHotEncoder(handle_unknown='ignore')
+        month_encoder.fit(month.reshape(-1, 1))
+        month_encoding = pd.DataFrame(month_encoder.transform(month.reshape(-1, 1)).toarray())
+
+        month_names = list(calendar.month_name)[1:]
+        month_names = [month.lower()[0:3] for month in month_names]
+
+        for i in range(len(month_names)):
+            self.data[month_names[i]] = month_encoding[i].values
+    
